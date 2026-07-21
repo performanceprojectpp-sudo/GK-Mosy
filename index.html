@@ -4751,8 +4751,7 @@ let gkCurrentFrame=null;
 let gkCurrentFrameDataUrl=null;
 
 // Riferimento globale all'URL oggetto
-// ── VIDEO ENGINE — universale, compatibile con WhatsApp/Telegram/Mail/Camera ──
-// ── VIDEO ENGINE v3 — FileReader come metodo primario (funziona su GitHub Pages) ──
+// ── VIDEO ENGINE v4 — Multi-strategy: ObjectURL → FileReader → ImageUpload fallback ──
 let gkVideoObjectURL = null;
 let gkVideoFile = null;
 
@@ -4764,74 +4763,121 @@ function loadGKVideo(){
   const placeholder=document.getElementById('gkv-player-placeholder');
   if(!player||!placeholder) return;
   const isEN=currentLang==='en';
+  const sizeMB=(file.size/1024/1024).toFixed(1);
 
-  // Reset stato
+  // Reset
   gkCurrentFrame=null; gkCurrentFrameDataUrl=null; gkVideoObjectURL=null;
-  const canvas=document.getElementById('gkv-canvas');
-  const cp=document.getElementById('gkv-canvas-placeholder');
-  if(canvas) canvas.style.display='none';
-  if(cp) cp.style.display='flex';
+  ['gkv-canvas'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='none';});
+  ['gkv-canvas-placeholder'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='flex';});
   const aiBtn=document.getElementById('gkv-ai-btn');
   if(aiBtn) aiBtn.disabled=true;
   player.onloadedmetadata=null; player.oncanplay=null; player.onerror=null;
+  player.removeAttribute('src');
   player.style.display='none';
 
-  // Controllo dimensione: file >150MB potrebbero essere lenti con FileReader
-  const sizeMB=file.size/1024/1024;
-  const msg=sizeMB>150
-    ? `⏳ ${isEN?'Loading large file':'Caricamento file grande'} (${sizeMB.toFixed(0)}MB)...`
-    : `⏳ ${isEN?'Loading video...':'Caricamento video...'}`;
-  placeholder.innerHTML=`<span style="text-align:center">${msg}</span>`;
+  placeholder.innerHTML=`<span style="text-align:center">⏳ ${isEN?'Loading':'Caricamento'}: 0%</span>`;
   placeholder.style.display='flex';
 
-  // Metodo primario: FileReader → data URL
-  // Funziona in tutti i browser, su qualsiasi hosting, senza restrizioni CORS
-  const reader=new FileReader();
-
-  reader.onprogress=(e)=>{
-    if(e.lengthComputable){
-      const pct=Math.round(e.loaded/e.total*100);
-      placeholder.innerHTML=`<span style="text-align:center">⏳ ${isEN?'Loading':'Caricamento'}: ${pct}%</span>`;
-    }
-  };
-
-  reader.onload=(e)=>{
-    gkVideoObjectURL=e.target.result; // data URL
-
-    player.onloadedmetadata=()=>{
-      player.style.display='block';
-      placeholder.style.display='none';
-    };
-
-    player.onerror=()=>{
-      // Data URL ha fallito — problema di codec, non di rete
-      placeholder.innerHTML=`<div style="text-align:center;padding:12px;line-height:1.8;font-size:12px">
-        <div style="font-size:20px;margin-bottom:6px">⚠️</div>
-        <b>${isEN?'Codec not supported by this browser':'Codec non supportato da questo browser'}</b><br>
-        <span style="color:var(--tx3)">${file.name} · ${sizeMB.toFixed(1)}MB</span><br><br>
-        <span>${isEN
-          ?'The file loaded correctly but cannot be decoded. Solutions:'
-          :'Il file è stato letto ma non può essere decodificato. Soluzioni:'
-        }</span><br>
-        <span style="color:var(--tx3)">• ${isEN?'Use Chrome or Firefox on desktop':'Usa Chrome o Firefox su PC'}</span><br>
-        <span style="color:var(--tx3)">• ${isEN?'Convert to MP4 H.264 with VLC: Media → Convert':'Converti in MP4 H.264 con VLC: Media → Converti'}</span><br>
-        <button class="secondary" style="margin-top:10px;font-size:11px" onclick="gkExtractBlind()">${isEN?'Extract frame anyway (blind)':'Estrai frame ugualmente (senza player)'}</button>
-      </div>`;
-      placeholder.style.display='flex';
-      player.style.display='none';
-    };
-
-    player.src=gkVideoObjectURL;
-    player.load();
-  };
-
-  reader.onerror=()=>{
-    placeholder.innerHTML=`<span style="text-align:center;padding:8px;color:var(--erT)">
-      ❌ ${isEN?'File read error. Try a different file.':'Errore lettura file. Prova un altro file.'}
-    </span>`;
+  // Mostra player di fallback se il codec non è supportato
+  const showCodecError=()=>{
+    placeholder.innerHTML=`
+    <div style="text-align:center;padding:14px;line-height:2;font-size:12px">
+      <div style="font-size:22px;margin-bottom:4px">🎬</div>
+      <b style="font-size:13px">${isEN?'Video loaded — player unavailable':'Video caricato — player non disponibile'}</b><br>
+      <span style="color:var(--tx3);font-size:11px">${isEN?'HEVC/H.265 codec not supported by this browser.':'Codec HEVC/H.265 non supportato da questo browser.'}</span><br>
+      <span style="color:var(--tx3);font-size:11px">${file.name} · ${sizeMB}MB</span><br><br>
+      <div style="background:var(--bg2);border-radius:8px;padding:10px;text-align:left;font-size:11px;line-height:1.9">
+        <b>${isEN?'To use the player, do one of:':'Per usare il player, scegli una di queste opzioni:'}</b><br>
+        <span>① ${isEN?'Open in Chrome on desktop (best support)':'Apri in Chrome su PC (miglior supporto)'}</span><br>
+        <span>② ${isEN?'On iPhone: use Safari (native HEVC support)':'Su iPhone: usa Safari (supporto HEVC nativo)'}</span><br>
+        <span>③ ${isEN?'Convert: send video to yourself via Telegram, download, re-upload':'Converti: invia il video a te stesso via Telegram, scarica, ricarica'}</span><br>
+        <span>④ ${isEN?'Or: take a screenshot of the key moment and upload it below':'Oppure: fai uno screenshot del momento chiave e caricalo qui sotto'}</span>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
+        <button class="primary" style="font-size:11px" onclick="gkExtractBlind()">📸 ${isEN?'Extract frame (no player)':'Estrai frame (senza player)'}</button>
+        <button class="secondary" style="font-size:11px" onclick="document.getElementById('gkv-screenshot-upload').click()">🖼️ ${isEN?'Upload screenshot instead':'Carica screenshot'}</button>
+      </div>
+      <input type="file" id="gkv-screenshot-upload" accept="image/*" style="display:none" onchange="gkLoadScreenshot(this)">
+    </div>`;
     placeholder.style.display='flex';
+    player.style.display='none';
   };
 
+  // STRATEGIA 1: ObjectURL (più veloce, non carica tutto in RAM)
+  const tryObjectURL=()=>{
+    try{
+      if(gkVideoObjectURL){URL.revokeObjectURL(gkVideoObjectURL);}
+      gkVideoObjectURL=URL.createObjectURL(file);
+      placeholder.innerHTML=`<span style="text-align:center">⏳ ${isEN?'Loading':'Caricamento'}...</span>`;
+
+      player.onloadedmetadata=()=>{
+        player.style.display='block';
+        placeholder.style.display='none';
+      };
+      player.onerror=()=>{
+        // ObjectURL fallito → prova FileReader
+        URL.revokeObjectURL(gkVideoObjectURL);
+        gkVideoObjectURL=null;
+        tryFileReader();
+      };
+      player.src=gkVideoObjectURL;
+      player.load();
+      // Timeout: se dopo 4s non ha caricato, prova FileReader
+      setTimeout(()=>{if(player.readyState<1&&player.style.display==='none') tryFileReader();},4000);
+    }catch(e){ tryFileReader(); }
+  };
+
+  // STRATEGIA 2: FileReader → data URL
+  const tryFileReader=()=>{
+    placeholder.innerHTML=`<span style="text-align:center">⏳ ${isEN?'Loading':'Caricamento'}: 0%</span>`;
+    const reader=new FileReader();
+    reader.onprogress=(e)=>{
+      if(e.lengthComputable){
+        const pct=Math.round(e.loaded/e.total*100);
+        placeholder.innerHTML=`<span style="text-align:center">⏳ ${isEN?'Loading':'Caricamento'}: ${pct}%</span>`;
+      }
+    };
+    reader.onload=(e)=>{
+      gkVideoObjectURL=e.target.result;
+      player.onloadedmetadata=()=>{player.style.display='block';placeholder.style.display='none';};
+      player.onerror=()=>showCodecError(); // Codec non supportato → mostra opzioni
+      player.src=gkVideoObjectURL;
+      player.load();
+    };
+    reader.onerror=()=>{
+      placeholder.innerHTML=`<span style="color:var(--erT)">❌ ${isEN?'File read error':'Errore lettura file'}</span>`;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  tryObjectURL();
+}
+
+// Carica screenshot al posto del video (fallback per codec non supportati)
+function gkLoadScreenshot(input){
+  const file=input?.files?.[0];
+  if(!file) return;
+  const reader=new FileReader();
+  reader.onload=(e)=>{
+    gkCurrentFrameDataUrl=e.target.result;
+    gkVideoObjectURL=e.target.result;
+    gkCurrentFrame=true;
+    // Mostra nel canvas
+    const canvas=document.getElementById('gkv-canvas');
+    const placeholder=document.getElementById('gkv-canvas-placeholder');
+    const img=new Image();
+    img.onload=()=>{
+      canvas.width=img.width; canvas.height=img.height;
+      canvas.getContext('2d').drawImage(img,0,0);
+      canvas.style.display='block';
+      if(placeholder) placeholder.style.display='none';
+    };
+    img.src=e.target.result;
+    const aiBtn=document.getElementById('gkv-ai-btn');
+    if(aiBtn){aiBtn.disabled=false;aiBtn.style.opacity='1';}
+    const pp=document.getElementById('gkv-player-placeholder');
+    if(pp){pp.innerHTML=`<span>✅ ${currentLang==='en'?'Screenshot loaded — ready for AI analysis':'Screenshot caricato — pronto per analisi AI'}</span>`;pp.style.display='flex';}
+  };
   reader.readAsDataURL(file);
 }
 
