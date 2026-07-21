@@ -4688,8 +4688,8 @@ R.gk_video=()=>{
 
   <div class="card">
     <div style="font-weight:700;font-size:13px;margin-bottom:10px;text-transform:uppercase">${isEN?'Video player':'Video player'}</div>
-    <video id="gkv-player" controls style="width:100%;border-radius:8px;background:#000;display:none;margin-bottom:10px" playsinline></video>
-    <div id="gkv-player-placeholder" style="width:100%;height:160px;background:var(--bg3);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--tx3);font-size:13px;margin-bottom:10px">
+    <video id="gkv-player" controls preload="metadata" style="width:100%;border-radius:8px;background:#000;display:none;margin-bottom:10px" playsinline></video>
+    <div id="gkv-player-placeholder" style="width:100%;height:160px;background:var(--bg3);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--tx3);font-size:13px;margin-bottom:10px;text-align:center;padding:12px">
       ${isEN?'📹 Load a video to start':'📹 Carica un video per iniziare'}
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -4747,16 +4747,44 @@ R.gk_video=()=>{
 let gkCurrentFrame=null;
 let gkCurrentFrameDataUrl=null;
 
+// Teniamo un riferimento globale all'URL oggetto per poterlo revocare
+let gkVideoObjectURL = null;
+
 function loadGKVideo(){
   const file=document.getElementById('gkv-file')?.files?.[0];
   if(!file)return;
   const player=document.getElementById('gkv-player');
   const placeholder=document.getElementById('gkv-player-placeholder');
-  if(player&&placeholder){
-    player.src=URL.createObjectURL(file);
+  if(!player||!placeholder)return;
+
+  // Revoca il vecchio URL per liberare memoria
+  if(gkVideoObjectURL){URL.revokeObjectURL(gkVideoObjectURL);}
+  gkVideoObjectURL=URL.createObjectURL(file);
+
+  // Reset stato frame
+  gkCurrentFrame=null;
+  gkCurrentFrameDataUrl=null;
+  const canvas=document.getElementById('gkv-canvas');
+  const canvasPlaceholder=document.getElementById('gkv-canvas-placeholder');
+  if(canvas){canvas.style.display='none';}
+  if(canvasPlaceholder){canvasPlaceholder.style.display='flex';}
+  const aiBtn=document.getElementById('gkv-ai-btn');
+  if(aiBtn){aiBtn.disabled=true;}
+
+  player.src=gkVideoObjectURL;
+  player.load(); // forza il browser a ricaricare il sorgente
+
+  player.onloadedmetadata=()=>{
     player.style.display='block';
     placeholder.style.display='none';
-  }
+  };
+
+  player.onerror=()=>{
+    const isEN=currentLang==='en';
+    placeholder.textContent=isEN?'❌ Error loading video. Try a different format (MP4 recommended).':'❌ Errore caricamento video. Prova un altro formato (MP4 consigliato).';
+    placeholder.style.display='flex';
+    player.style.display='none';
+  };
 }
 
 function extractGKFrame(){
@@ -4764,13 +4792,26 @@ function extractGKFrame(){
   const player=document.getElementById('gkv-player');
   const canvas=document.getElementById('gkv-canvas');
   const placeholder=document.getElementById('gkv-canvas-placeholder');
-  if(!player||player.style.display==='none'||!player.src){
+
+  if(!player||!gkVideoObjectURL){
     alert(isEN?'Load a video first.':'Carica prima un video.');return;
   }
-  canvas.width=player.videoWidth||640;
-  canvas.height=player.videoHeight||360;
+  if(player.readyState < 2){
+    alert(isEN?'Wait for the video to load completely.':'Attendi che il video sia completamente caricato.');return;
+  }
+  if(!player.videoWidth||!player.videoHeight){
+    alert(isEN?'Video dimensions not available. Try pausing the video first.':'Dimensioni video non disponibili. Prova a mettere in pausa il video prima.');return;
+  }
+
+  // Scala il canvas per evitare frame troppo grandi (max 1280px)
+  const maxW=1280;
+  const ratio=Math.min(1, maxW/player.videoWidth);
+  canvas.width=Math.round(player.videoWidth*ratio);
+  canvas.height=Math.round(player.videoHeight*ratio);
+
   const ctx=canvas.getContext('2d');
   ctx.drawImage(player,0,0,canvas.width,canvas.height);
+
   gkCurrentFrameDataUrl=canvas.toDataURL('image/jpeg',0.85);
   canvas.style.display='block';
   if(placeholder)placeholder.style.display='none';
