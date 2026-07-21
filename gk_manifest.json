@@ -1,8 +1,8 @@
 {
-  "name": "GK-MoSy — Goalkeeper Monitoring System",
+  "name": "GK-MoSy \u2014 Goalkeeper Monitoring System",
   "short_name": "GK-MoSy",
-  "description": "GK-MoSy — Goalkeeper Monitoring & Video Analysis by Performance Project",
-  "start_url": "./gk_mosy.html",
+  "description": "GK-MoSy \u2014 Goalkeeper Monitoring & Video Analysis by Performance Project",
+  "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#0d0d0d",
   "theme_color": "#059669",
@@ -23,5 +23,9 @@
       "purpose": "any maskable"
     }
   ],
-  "categories": ["sports", "health", "fitness"]
+  "categories": [
+    "sports",
+    "health",
+    "fitness"
+  ]
 }
