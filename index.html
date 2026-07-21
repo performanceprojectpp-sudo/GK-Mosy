@@ -4749,41 +4749,9 @@ let gkCurrentFrameDataUrl=null;
 
 // Riferimento globale all'URL oggetto
 // ── VIDEO ENGINE — universale, compatibile con WhatsApp/Telegram/Mail/Camera ──
+// ── VIDEO ENGINE v3 — FileReader come metodo primario (funziona su GitHub Pages) ──
 let gkVideoObjectURL = null;
 let gkVideoFile = null;
-
-const GK_MIME_MAP = {
-  'mp4':'video/mp4','m4v':'video/mp4','mov':'video/mp4',
-  'webm':'video/webm','ogv':'video/ogg','ogg':'video/ogg',
-  'avi':'video/mp4','3gp':'video/3gpp','3gpp':'video/3gpp',
-  'mkv':'video/webm','hevc':'video/mp4','heic':'video/mp4',
-};
-
-function getMimeType(file){
-  if(file.type&&file.type!=='application/octet-stream'&&file.type.startsWith('video/')) return file.type;
-  const ext=file.name.split('.').pop().toLowerCase();
-  return GK_MIME_MAP[ext]||'video/mp4';
-}
-
-function gkForceLoadWithReader(){
-  if(!gkVideoFile) return;
-  const isEN=currentLang==='en';
-  const placeholder=document.getElementById('gkv-player-placeholder');
-  const player=document.getElementById('gkv-player');
-  if(placeholder) placeholder.innerHTML=`<span>⏳ ${isEN?'Alternative loading...':'Caricamento alternativo...'}</span>`;
-  const reader=new FileReader();
-  reader.onload=(e)=>{
-    const dataUrl=e.target.result;
-    player.onloadedmetadata=()=>{player.style.display='block';if(placeholder)placeholder.style.display='none';};
-    player.onerror=()=>{
-      if(placeholder)placeholder.innerHTML=`<span style="text-align:center;padding:8px">❌ ${isEN?'Video cannot be played in this browser. Try Chrome on desktop.':'Video non riproducibile in questo browser. Prova Chrome su PC.'}</span>`;
-      placeholder.style.display='flex';player.style.display='none';
-    };
-    player.src=dataUrl;player.load();gkVideoObjectURL=dataUrl;
-  };
-  reader.onerror=()=>{if(placeholder)placeholder.innerHTML=`<span>❌ ${isEN?'File read error.':'Errore lettura file.'}</span>`;};
-  reader.readAsDataURL(gkVideoFile);
-}
 
 function loadGKVideo(){
   const file=document.getElementById('gkv-file')?.files?.[0];
@@ -4793,41 +4761,106 @@ function loadGKVideo(){
   const placeholder=document.getElementById('gkv-player-placeholder');
   if(!player||!placeholder) return;
   const isEN=currentLang==='en';
-  // Reset
-  gkCurrentFrame=null; gkCurrentFrameDataUrl=null;
+
+  // Reset stato
+  gkCurrentFrame=null; gkCurrentFrameDataUrl=null; gkVideoObjectURL=null;
   const canvas=document.getElementById('gkv-canvas');
   const cp=document.getElementById('gkv-canvas-placeholder');
   if(canvas) canvas.style.display='none';
   if(cp) cp.style.display='flex';
   const aiBtn=document.getElementById('gkv-ai-btn');
   if(aiBtn) aiBtn.disabled=true;
-  placeholder.innerHTML=`<span>⏳ ${isEN?'Loading video...':'Caricamento video...'}</span>`;
-  placeholder.style.display='flex';
-  player.style.display='none';
   player.onloadedmetadata=null; player.oncanplay=null; player.onerror=null;
+  player.style.display='none';
 
-  const mimes=[getMimeType(file),'video/mp4','video/webm','video/ogg'].filter((v,i,a)=>a.indexOf(v)===i);
+  // Controllo dimensione: file >150MB potrebbero essere lenti con FileReader
+  const sizeMB=file.size/1024/1024;
+  const msg=sizeMB>150
+    ? `⏳ ${isEN?'Loading large file':'Caricamento file grande'} (${sizeMB.toFixed(0)}MB)...`
+    : `⏳ ${isEN?'Loading video...':'Caricamento video...'}`;
+  placeholder.innerHTML=`<span style="text-align:center">${msg}</span>`;
+  placeholder.style.display='flex';
 
-  function tryMime(idx){
-    if(idx>=mimes.length){
-      placeholder.innerHTML=`<div style="text-align:center;padding:12px;line-height:1.8">
-        <div style="font-size:20px;margin-bottom:6px">⚠️</div>
-        <div style="font-weight:600;margin-bottom:4px">${isEN?'Format not supported':'Formato non supportato'}</div>
-        <div style="font-size:11px;color:var(--tx3)">${file.name} (${(file.size/1024/1024).toFixed(1)}MB)</div>
-        <button class="secondary" style="margin-top:10px;font-size:11px" onclick="gkForceLoadWithReader()">${isEN?'Try alternative loader':'Prova caricamento alternativo'}</button>
-      </div>`;
-      placeholder.style.display='flex'; player.style.display='none'; return;
+  // Metodo primario: FileReader → data URL
+  // Funziona in tutti i browser, su qualsiasi hosting, senza restrizioni CORS
+  const reader=new FileReader();
+
+  reader.onprogress=(e)=>{
+    if(e.lengthComputable){
+      const pct=Math.round(e.loaded/e.total*100);
+      placeholder.innerHTML=`<span style="text-align:center">⏳ ${isEN?'Loading':'Caricamento'}: ${pct}%</span>`;
     }
-    if(gkVideoObjectURL&&!gkVideoObjectURL.startsWith('data:')){ try{URL.revokeObjectURL(gkVideoObjectURL);}catch(e){} }
-    const blob=new Blob([file],{type:mimes[idx]});
-    gkVideoObjectURL=URL.createObjectURL(blob);
-    player.onloadedmetadata=()=>{player.style.display='block';placeholder.style.display='none';};
-    player.onerror=()=>tryMime(idx+1);
+  };
+
+  reader.onload=(e)=>{
+    gkVideoObjectURL=e.target.result; // data URL
+
+    player.onloadedmetadata=()=>{
+      player.style.display='block';
+      placeholder.style.display='none';
+    };
+
+    player.onerror=()=>{
+      // Data URL ha fallito — problema di codec, non di rete
+      placeholder.innerHTML=`<div style="text-align:center;padding:12px;line-height:1.8;font-size:12px">
+        <div style="font-size:20px;margin-bottom:6px">⚠️</div>
+        <b>${isEN?'Codec not supported by this browser':'Codec non supportato da questo browser'}</b><br>
+        <span style="color:var(--tx3)">${file.name} · ${sizeMB.toFixed(1)}MB</span><br><br>
+        <span>${isEN
+          ?'The file loaded correctly but cannot be decoded. Solutions:'
+          :'Il file è stato letto ma non può essere decodificato. Soluzioni:'
+        }</span><br>
+        <span style="color:var(--tx3)">• ${isEN?'Use Chrome or Firefox on desktop':'Usa Chrome o Firefox su PC'}</span><br>
+        <span style="color:var(--tx3)">• ${isEN?'Convert to MP4 H.264 with VLC: Media → Convert':'Converti in MP4 H.264 con VLC: Media → Converti'}</span><br>
+        <button class="secondary" style="margin-top:10px;font-size:11px" onclick="gkExtractBlind()">${isEN?'Extract frame anyway (blind)':'Estrai frame ugualmente (senza player)'}</button>
+      </div>`;
+      placeholder.style.display='flex';
+      player.style.display='none';
+    };
+
     player.src=gkVideoObjectURL;
     player.load();
-    setTimeout(()=>{if(player.readyState<1&&player.style.display==='none') tryMime(idx+1);},3000);
-  }
-  tryMime(0);
+  };
+
+  reader.onerror=()=>{
+    placeholder.innerHTML=`<span style="text-align:center;padding:8px;color:var(--erT)">
+      ❌ ${isEN?'File read error. Try a different file.':'Errore lettura file. Prova un altro file.'}
+    </span>`;
+    placeholder.style.display='flex';
+  };
+
+  reader.readAsDataURL(file);
+}
+
+// Estrazione "cieca" — crea un video element nascosto come fallback
+function gkExtractBlind(){
+  const isEN=currentLang==='en';
+  if(!gkVideoObjectURL){alert(isEN?'Load a video first.':'Carica prima un video.');return;}
+  const placeholder=document.getElementById('gkv-canvas-placeholder');
+  const canvas=document.getElementById('gkv-canvas');
+  // Crea video temporaneo
+  const v=document.createElement('video');
+  v.style.display='none';
+  v.muted=true;
+  v.src=gkVideoObjectURL;
+  document.body.appendChild(v);
+  v.onseeked=()=>{
+    canvas.width=v.videoWidth||640; canvas.height=v.videoHeight||360;
+    canvas.getContext('2d').drawImage(v,0,0,canvas.width,canvas.height);
+    gkCurrentFrameDataUrl=canvas.toDataURL('image/jpeg',0.85);
+    canvas.style.display='block';
+    if(placeholder) placeholder.style.display='none';
+    const aiBtn=document.getElementById('gkv-ai-btn');
+    if(aiBtn){aiBtn.disabled=false;aiBtn.style.opacity='1';}
+    gkCurrentFrame=true;
+    document.body.removeChild(v);
+  };
+  v.onerror=()=>{
+    alert(isEN?'Cannot decode video. Please convert to MP4 H.264.':'Impossibile decodificare. Converti in MP4 H.264.');
+    document.body.removeChild(v);
+  };
+  v.addEventListener('loadedmetadata',()=>{v.currentTime=0.1;});
+  v.load();
 }
 
 function extractGKFrame(){
@@ -4835,7 +4868,8 @@ function extractGKFrame(){
   const player=document.getElementById('gkv-player');
   const canvas=document.getElementById('gkv-canvas');
   const placeholder=document.getElementById('gkv-canvas-placeholder');
-  if(!player||!gkVideoObjectURL){alert(isEN?'Load a video first.':'Carica prima un video.');return;}
+  if(!gkVideoObjectURL){alert(isEN?'Load a video first.':'Carica prima un video.');return;}
+
   const doExtract=()=>{
     const w=player.videoWidth||640, h=player.videoHeight||360;
     const ratio=Math.min(1,1280/w);
@@ -4848,8 +4882,15 @@ function extractGKFrame(){
     if(aiBtn){aiBtn.disabled=false;aiBtn.style.opacity='1';}
     gkCurrentFrame=true;
   };
-  if(player.readyState>=2){doExtract();}
-  else{const fn=()=>{player.removeEventListener('canplay',fn);doExtract();};player.addEventListener('canplay',fn);}
+
+  if(player&&player.readyState>=2){
+    doExtract();
+  } else if(player&&player.src){
+    const fn=()=>{player.removeEventListener('canplay',fn);doExtract();};
+    player.addEventListener('canplay',fn);
+  } else {
+    gkExtractBlind();
+  }
 }
 
 async function runGKAIAnalysis(){
