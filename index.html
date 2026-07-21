@@ -4747,7 +4747,7 @@ R.gk_video=()=>{
 let gkCurrentFrame=null;
 let gkCurrentFrameDataUrl=null;
 
-// Teniamo un riferimento globale all'URL oggetto per poterlo revocare
+// Riferimento globale all'URL oggetto
 let gkVideoObjectURL = null;
 
 function loadGKVideo(){
@@ -4757,7 +4757,7 @@ function loadGKVideo(){
   const placeholder=document.getElementById('gkv-player-placeholder');
   if(!player||!placeholder)return;
 
-  // Revoca il vecchio URL per liberare memoria
+  // Revoca il vecchio URL
   if(gkVideoObjectURL){URL.revokeObjectURL(gkVideoObjectURL);}
   gkVideoObjectURL=URL.createObjectURL(file);
 
@@ -4771,20 +4771,34 @@ function loadGKVideo(){
   const aiBtn=document.getElementById('gkv-ai-btn');
   if(aiBtn){aiBtn.disabled=true;}
 
-  player.src=gkVideoObjectURL;
-  player.load(); // forza il browser a ricaricare il sorgente
+  // Mostra subito il player e imposta src
+  placeholder.style.display='none';
+  player.style.display='block';
 
-  player.onloadedmetadata=()=>{
+  // Rimuove eventuali listener precedenti
+  player.onloadedmetadata=null;
+  player.oncanplay=null;
+  player.onerror=null;
+
+  player.oncanplay=()=>{
+    // Video pronto per la riproduzione
     player.style.display='block';
     placeholder.style.display='none';
   };
 
-  player.onerror=()=>{
+  player.onerror=(e)=>{
     const isEN=currentLang==='en';
-    placeholder.textContent=isEN?'❌ Error loading video. Try a different format (MP4 recommended).':'❌ Errore caricamento video. Prova un altro formato (MP4 consigliato).';
+    const msg=isEN
+      ?'❌ Error loading video. MP4 (H.264) is recommended. Try converting with VLC or HandBrake.'
+      :'❌ Errore caricamento. Usa MP4 (H.264). Converti con VLC o HandBrake se necessario.';
+    placeholder.innerHTML=`<span style="text-align:center;padding:8px">${msg}</span>`;
     placeholder.style.display='flex';
     player.style.display='none';
   };
+
+  // Imposta src DOPO i listener, poi carica
+  player.setAttribute('src', gkVideoObjectURL);
+  player.load();
 }
 
 function extractGKFrame(){
@@ -4796,28 +4810,46 @@ function extractGKFrame(){
   if(!player||!gkVideoObjectURL){
     alert(isEN?'Load a video first.':'Carica prima un video.');return;
   }
-  if(player.readyState < 2){
-    alert(isEN?'Wait for the video to load completely.':'Attendi che il video sia completamente caricato.');return;
+
+  // Se il video non è ancora pronto, prova a forzare il seek a 0 e poi estrae
+  const doExtract=()=>{
+    const w=player.videoWidth||640;
+    const h=player.videoHeight||360;
+    const maxW=1280;
+    const ratio=Math.min(1, maxW/w);
+    canvas.width=Math.round(w*ratio);
+    canvas.height=Math.round(h*ratio);
+    const ctx=canvas.getContext('2d');
+    ctx.drawImage(player,0,0,canvas.width,canvas.height);
+    // Verifica che non sia un frame nero (pixel sample)
+    const px=ctx.getImageData(canvas.width/2, canvas.height/2, 1, 1).data;
+    const isBlack=(px[0]+px[1]+px[2])<10;
+    if(isBlack){
+      ctx.fillStyle='#1a1a1a';
+      ctx.font=`${Math.round(canvas.height/20)}px sans-serif`;
+      ctx.fillStyle='#aaa';
+      ctx.textAlign='center';
+      ctx.fillText(isEN?'Frame extracted (seek video before extracting)':'Frame estratto (scrubba il video prima)',canvas.width/2,canvas.height/2);
+    }
+    gkCurrentFrameDataUrl=canvas.toDataURL('image/jpeg',0.85);
+    canvas.style.display='block';
+    if(placeholder)placeholder.style.display='none';
+    const aiBtn=document.getElementById('gkv-ai-btn');
+    if(aiBtn){aiBtn.disabled=false;aiBtn.style.opacity='1';}
+    gkCurrentFrame=true;
+  };
+
+  if(player.readyState >= 2){
+    doExtract();
+  } else {
+    // Video non ancora pronto: aspetta canplaythrough
+    const onReady=()=>{
+      player.removeEventListener('canplay', onReady);
+      doExtract();
+    };
+    player.addEventListener('canplay', onReady);
+    player.load();
   }
-  if(!player.videoWidth||!player.videoHeight){
-    alert(isEN?'Video dimensions not available. Try pausing the video first.':'Dimensioni video non disponibili. Prova a mettere in pausa il video prima.');return;
-  }
-
-  // Scala il canvas per evitare frame troppo grandi (max 1280px)
-  const maxW=1280;
-  const ratio=Math.min(1, maxW/player.videoWidth);
-  canvas.width=Math.round(player.videoWidth*ratio);
-  canvas.height=Math.round(player.videoHeight*ratio);
-
-  const ctx=canvas.getContext('2d');
-  ctx.drawImage(player,0,0,canvas.width,canvas.height);
-
-  gkCurrentFrameDataUrl=canvas.toDataURL('image/jpeg',0.85);
-  canvas.style.display='block';
-  if(placeholder)placeholder.style.display='none';
-  const aiBtn=document.getElementById('gkv-ai-btn');
-  if(aiBtn){aiBtn.disabled=false;aiBtn.style.opacity='1';}
-  gkCurrentFrame=true;
 }
 
 async function runGKAIAnalysis(){
