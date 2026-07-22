@@ -1,4 +1,4 @@
-const CACHE = 'gk-mosy-v8-1784669886'
+const CACHE = 'gk-mosy-v9-1784704541'
 const ASSETS = [
   './',
   './index.html',

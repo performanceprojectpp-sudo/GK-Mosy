@@ -4950,41 +4950,221 @@ async function runGKAIAnalysis(){
   const saveBtn=document.getElementById('gkv-save-btn');
   const action=document.getElementById('gkv-action')?.value||'dive';
   const notes=document.getElementById('gkv-notes')?.value||'';
-  const actionLabels={dive:isEN?'diving save':'tuffo/parata',distribution:isEN?'distribution':'distribuzione',positioning:isEN?'positioning/angle play':'posizionamento/angolo',aerial:isEN?'aerial claim/punch':'uscita cross/pugno','1v1':isEN?'1v1 situation':'situazione 1v1',footwork:isEN?'footwork':'lavoro coi piedi',other:isEN?'other action':'altra azione'};
+  const actionLabels={
+    dive:isEN?'diving save':'tuffo/parata',
+    distribution:isEN?'distribution':'distribuzione',
+    positioning:isEN?'positioning/angle play':'posizionamento/angolo',
+    aerial:isEN?'aerial claim/punch':'uscita cross/pugno',
+    '1v1':isEN?'1v1 situation':'situazione 1v1',
+    footwork:isEN?'footwork':'lavoro coi piedi',
+    other:isEN?'other action':'altra azione'
+  };
 
   if(reportEl)reportEl.innerHTML=`<div style="color:var(--pu);font-size:12px">⏳ ${isEN?'AI analysis in progress...':'Analisi AI in corso...'}</div>`;
   if(aiBtn){aiBtn.disabled=true;aiBtn.textContent=isEN?'⏳ Analysing...':'⏳ Analisi...';}
 
-  const systemPrompt = isEN
-    ? `You are an expert goalkeeper coach and biomechanics analyst. Analyse the provided video frame showing a goalkeeper performing a ${actionLabels[action]}. Write a detailed biomechanical report in English covering: 1) POSTURE & BODY POSITION: describe the goalkeeper's overall stance, weight distribution, and balance. 2) JOINT ANGLES: identify and estimate key joint angles visible (hips, knees, ankles, shoulders, elbows, wrists). 3) TECHNICAL EXECUTION: evaluate the technique quality for this specific action. 4) STRENGTHS: what the goalkeeper is doing well biomechanically. 5) AREAS FOR IMPROVEMENT: specific corrections or coaching cues. 6) COACHING RECOMMENDATIONS: practical drills or cues to improve this technique. Be specific, professional, and concise. Format with clear headings.${notes?` Additional context from the coach: ${notes}`:''}` 
-    : `Sei un esperto preparatore dei portieri e analista biomeccanico. Analizza il frame video fornito che mostra un portiere durante un/una ${actionLabels[action]}. Scrivi un report biomeccanico dettagliato in italiano che copra: 1) POSTURA E POSIZIONE CORPOREA: descrivi la postura generale, distribuzione del peso ed equilibrio. 2) ANGOLI ARTICOLARI: identifica e stima i principali angoli articolari visibili (anche, ginocchia, caviglie, spalle, gomiti, polsi). 3) ESECUZIONE TECNICA: valuta la qualità della tecnica per questa specifica azione. 4) PUNTI DI FORZA: cosa il portiere sta facendo bene dal punto di vista biomeccanico. 5) AREE DI MIGLIORAMENTO: correzioni specifiche o indicazioni tecniche. 6) RACCOMANDAZIONI DI ALLENAMENTO: esercitazioni pratiche o indicazioni per migliorare questa tecnica. Sii specifico, professionale e conciso. Usa intestazioni chiare.${notes?` Contesto aggiuntivo dal preparatore: ${notes}`:''}`;
+  const systemPrompt=isEN
+    ?`You are an expert goalkeeper coach and biomechanics analyst. Analyse the provided image showing a goalkeeper performing a ${actionLabels[action]}. Write a detailed biomechanical report covering: 1) POSTURE & BODY POSITION 2) JOINT ANGLES (estimate hips, knees, ankles, shoulders visible) 3) TECHNICAL EXECUTION 4) STRENGTHS 5) AREAS FOR IMPROVEMENT 6) COACHING RECOMMENDATIONS. Be specific, professional, concise. Use clear headings.${notes?` Coach context: ${notes}`:''}`
+    :`Sei un esperto preparatore dei portieri e analista biomeccanico. Analizza l'immagine fornita che mostra un portiere durante ${actionLabels[action]}. Scrivi un report biomeccanico dettagliato: 1) POSTURA E POSIZIONE CORPOREA 2) ANGOLI ARTICOLARI (stima anche, ginocchia, caviglie, spalle visibili) 3) ESECUZIONE TECNICA 4) PUNTI DI FORZA 5) AREE DI MIGLIORAMENTO 6) RACCOMANDAZIONI ALLENAMENTO. Sii specifico, professionale, conciso. Usa intestazioni chiare.${notes?` Contesto coach: ${notes}`:''}`;
 
-  try {
-    const base64=gkCurrentFrameDataUrl.split(',')[1];
-    const response=await fetch('https://api.anthropic.com/v1/messages',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        model:'claude-sonnet-4-6',
-        max_tokens:1000,
-        system:systemPrompt,
-        messages:[{role:'user',content:[
-          {type:'image',source:{type:'base64',media_type:'image/jpeg',data:base64}},
-          {type:'text',text:isEN?`Analyse this goalkeeper frame (action: ${actionLabels[action]}). Generate the full biomechanical report.`:`Analizza questo frame del portiere (azione: ${actionLabels[action]}). Genera il report biomeccanico completo.`}
-        ]}]
-      })
-    });
-    const data=await response.json();
-    const text=(data.content||[]).filter(c=>c.type==='text').map(c=>c.text).join('');
-    if(!text){throw new Error('Empty response');}
-    const formatted=text.replace(/\n\n/g,'<br><br>').replace(/\n/g,'<br>').replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/^#+\s*(.+)$/gm,'<div style="font-weight:700;font-size:13px;color:var(--pu);margin:10px 0 4px">$1</div>');
-    if(reportEl)reportEl.innerHTML=`<div style="line-height:1.8">${formatted}</div>`;
-    if(saveBtn)saveBtn.style.display='block';
-    gkCurrentReport=text;
-  } catch(e){
-    if(reportEl)reportEl.innerHTML=`<div style="color:var(--erT);font-size:12px">❌ ${isEN?'Analysis error: '+e.message:'Errore analisi: '+e.message}</div>`;
+  const base64=gkCurrentFrameDataUrl.split(',')[1];
+  const mediaType=gkCurrentFrameDataUrl.split(';')[0].split(':')[1]||'image/jpeg';
+
+  const payload={
+    model:'claude-sonnet-4-6',
+    max_tokens:1024,
+    system:systemPrompt,
+    messages:[{role:'user',content:[
+      {type:'image',source:{type:'base64',media_type:mediaType,data:base64}},
+      {type:'text',text:isEN?`Analyse this goalkeeper image (action: ${actionLabels[action]}). Generate the biomechanical report.`:`Analizza questa immagine del portiere (azione: ${actionLabels[action]}). Genera il report biomeccanico.`}
+    ]}]
+  };
+
+  // Prova 3 endpoint in ordine: diretto → proxy1 → proxy2
+  const endpoints=[
+    {url:'https://api.anthropic.com/v1/messages',headers:{'Content-Type':'application/json'}},
+    {url:'https://corsproxy.io/?https://api.anthropic.com/v1/messages',headers:{'Content-Type':'application/json'}},
+    {url:'https://api.allorigins.win/raw?url='+encodeURIComponent('https://api.anthropic.com/v1/messages'),headers:{'Content-Type':'application/json'}},
+  ];
+
+  let lastErr='';
+  for(const ep of endpoints){
+    try{
+      const resp=await fetch(ep.url,{method:'POST',headers:ep.headers,body:JSON.stringify(payload)});
+      if(!resp.ok){
+        const errText=await resp.text().catch(()=>'');
+        // 401 = no auth key (CORS proxy non inietta la key) — non riprovare
+        if(resp.status===401||resp.status===403){lastErr=`Auth error (${resp.status}) — API key not available on this hosting`;break;}
+        lastErr=`HTTP ${resp.status}: ${errText.substring(0,100)}`;
+        continue;
+      }
+      const data=await resp.json();
+      const text=(data.content||[]).filter(c=>c.type==='text').map(c=>c.text).join('');
+      if(!text){lastErr='Empty response';continue;}
+      const fmt=text
+        .replace(/\n\n/g,'<br><br>').replace(/\n/g,'<br>')
+        .replace(/\*\*(.+?)\*\*/g,'<b>$1</b>')
+        .replace(/^#+\s*(.+)$/gm,'<div style="font-weight:700;font-size:13px;color:var(--pu);margin:10px 0 4px">$1</div>');
+      if(reportEl)reportEl.innerHTML=`<div style="line-height:1.8">${fmt}</div>`;
+      if(saveBtn)saveBtn.style.display='block';
+      gkCurrentReport=text;
+      if(aiBtn){aiBtn.disabled=false;aiBtn.textContent=`🤖 ${isEN?'AI Analysis — Generate report':'Analisi AI — Genera report'}`;}
+      return; // successo
+    }catch(err){lastErr=err.message||String(err);}
   }
+
+  // Tutti gli endpoint falliti — mostra soluzione alternativa
+  const isApiKeyError=lastErr.toLowerCase().includes('auth')||lastErr.toLowerCase().includes('401')||lastErr.toLowerCase().includes('403')||lastErr.toLowerCase().includes('fetch');
+  if(reportEl)reportEl.innerHTML=`
+    <div style="background:var(--bg2);border-radius:8px;padding:14px;font-size:12px;line-height:1.9">
+      <div style="font-weight:700;font-size:13px;margin-bottom:8px;color:var(--erT)">⚠️ ${isEN?'Direct AI call not available from this hosting':'Chiamata AI diretta non disponibile da questo hosting'}</div>
+      <div style="color:var(--tx2);margin-bottom:12px;font-size:11px">${isEN
+        ?'GitHub Pages blocks direct calls to the Anthropic API (CORS policy). Use one of these alternatives:'
+        :'GitHub Pages blocca le chiamate dirette all\'API Anthropic (policy CORS). Usa una di queste alternative:'
+      }</div>
+      <div style="margin-bottom:10px">
+        <b>① ${isEN?'Analyse with Claude.ai (recommended)':'Analizza con Claude.ai (consigliato)'}</b><br>
+        <span style="color:var(--tx3);font-size:11px">${isEN
+          ?'The frame has been copied to your clipboard. Open Claude.ai, paste the image and ask for a biomechanical analysis.'
+          :'Il frame è stato copiato. Apri Claude.ai, incolla l\'immagine e chiedi un\'analisi biomeccanica.'
+        }</span><br>
+        <button class="primary" style="margin-top:6px;font-size:11px" onclick="gkOpenClaudeAI()">🤖 ${isEN?'Open Claude.ai':'Apri Claude.ai'}</button>
+        <button class="secondary" style="margin-top:6px;font-size:11px;margin-left:6px" onclick="gkCopyFrame()">📋 ${isEN?'Copy frame to clipboard':'Copia frame negli appunti'}</button>
+      </div>
+      <div>
+        <b>② ${isEN?'Manual report (offline)':'Report manuale (offline)'}</b><br>
+        <span style="color:var(--tx3);font-size:11px">${isEN?'Generate a structured template to fill in manually.':'Genera un template strutturato da compilare manualmente.'}</span><br>
+        <button class="secondary" style="margin-top:6px;font-size:11px" onclick="gkGenerateManualReport('${action}','${isEN?'en':'it'}')">📝 ${isEN?'Generate manual template':'Genera template manuale'}</button>
+      </div>
+      <div style="margin-top:8px;font-size:10px;color:var(--tx3)">Error: ${lastErr.substring(0,120)}</div>
+    </div>`;
   if(aiBtn){aiBtn.disabled=false;aiBtn.textContent=`🤖 ${isEN?'AI Analysis — Generate report':'Analisi AI — Genera report'}`;}
+}
+
+// Copia il frame negli appunti
+async function gkCopyFrame(){
+  const isEN=currentLang==='en';
+  if(!gkCurrentFrameDataUrl){alert(isEN?'No frame to copy.':'Nessun frame da copiare.');return;}
+  try{
+    const canvas=document.getElementById('gkv-canvas');
+    canvas.toBlob(async(blob)=>{
+      try{
+        await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);
+        alert(isEN?'✅ Frame copied! Now open Claude.ai and paste it (Ctrl+V).':'✅ Frame copiato! Apri Claude.ai e incollalo (Ctrl+V).');
+      }catch(e){
+        // Clipboard API non disponibile — download diretto
+        const a=document.createElement('a');
+        a.href=gkCurrentFrameDataUrl;
+        a.download='gk_frame_analysis.jpg';
+        a.click();
+        alert(isEN?'Frame downloaded. Open Claude.ai and attach the file.':'Frame scaricato. Apri Claude.ai e allega il file.');
+      }
+    },'image/png');
+  }catch(e){alert(isEN?'Error: '+e.message:'Errore: '+e.message);}
+}
+
+// Apre Claude.ai con il prompt precompilato
+function gkOpenClaudeAI(){
+  const isEN=currentLang==='en';
+  const action=document.getElementById('gkv-action')?.value||'dive';
+  const notes=document.getElementById('gkv-notes')?.value||'';
+  const prompt=isEN
+    ?`You are an expert goalkeeper coach and biomechanics analyst. I am attaching an image of a goalkeeper performing a ${action}. Please provide a detailed biomechanical report covering: 1) Posture & body position 2) Key joint angles (hips, knees, ankles, shoulders) 3) Technical execution quality 4) Strengths 5) Areas for improvement 6) Specific coaching recommendations.${notes?' Coach context: '+notes:''}`
+    :`Sei un esperto preparatore dei portieri e analista biomeccanico. Ti allego un'immagine di un portiere durante ${action}. Fornisci un report biomeccanico dettagliato su: 1) Postura e posizione corporea 2) Angoli articolari principali (anche, ginocchia, caviglie, spalle) 3) Qualità esecuzione tecnica 4) Punti di forza 5) Aree di miglioramento 6) Raccomandazioni specifiche di allenamento.${notes?' Contesto coach: '+notes:''}`;
+  window.open('https://claude.ai/new?q='+encodeURIComponent(prompt),'_blank');
+  // Scarica anche il frame per allegarlo
+  setTimeout(()=>{
+    if(gkCurrentFrameDataUrl){
+      const a=document.createElement('a');
+      a.href=gkCurrentFrameDataUrl;
+      a.download='gk_frame_for_claude.jpg';
+      a.click();
+    }
+  },500);
+  alert(isEN
+    ?'Claude.ai opened with the prompt. Attach the downloaded frame image and send.'
+    :'Claude.ai aperto con il prompt. Allega l\'immagine del frame scaricata e invia.');
+}
+
+// Genera template manuale strutturato
+function gkGenerateManualReport(action,lang){
+  const isEN=lang==='en';
+  const template=isEN?`
+## BIOMECHANICAL ANALYSIS REPORT
+**Date:** ${new Date().toLocaleDateString()} | **Action:** ${action}
+
+### 1. POSTURE & BODY POSITION
+- Overall stance: ___
+- Weight distribution: ___
+- Balance/Centre of gravity: ___
+
+### 2. JOINT ANGLES (estimated)
+- Hip flexion: ___ °
+- Knee flexion: ___ °
+- Ankle angle: ___ °
+- Shoulder position: ___
+- Elbow angle: ___ °
+
+### 3. TECHNICAL EXECUTION
+Rating (1–10): ___
+Observations: ___
+
+### 4. STRENGTHS
+- ___
+- ___
+
+### 5. AREAS FOR IMPROVEMENT
+- ___
+- ___
+
+### 6. COACHING RECOMMENDATIONS
+- ___
+- ___
+
+**Coach notes:** ___`:`
+## REPORT ANALISI BIOMECCANICA
+**Data:** ${new Date().toLocaleDateString()} | **Azione:** ${action}
+
+### 1. POSTURA E POSIZIONE CORPOREA
+- Postura generale: ___
+- Distribuzione del peso: ___
+- Equilibrio/Centro di gravità: ___
+
+### 2. ANGOLI ARTICOLARI (stimati)
+- Flessione anca: ___ °
+- Flessione ginocchio: ___ °
+- Angolo caviglia: ___ °
+- Posizione spalle: ___
+- Angolo gomito: ___ °
+
+### 3. ESECUZIONE TECNICA
+Valutazione (1–10): ___
+Osservazioni: ___
+
+### 4. PUNTI DI FORZA
+- ___
+- ___
+
+### 5. AREE DI MIGLIORAMENTO
+- ___
+- ___
+
+### 6. RACCOMANDAZIONI ALLENAMENTO
+- ___
+- ___
+
+**Note preparatore:** ___`;
+
+  const reportEl=document.getElementById('gkv-report');
+  const saveBtn=document.getElementById('gkv-save-btn');
+  const fmt=template.trim()
+    .replace(/\n\n/g,'<br><br>').replace(/\n/g,'<br>')
+    .replace(/\*\*(.+?)\*\*/g,'<b>$1</b>')
+    .replace(/^###\s*(.+)$/gm,'<div style="font-weight:700;font-size:13px;color:var(--pu);margin:10px 0 4px">$1</div>')
+    .replace(/^##\s*(.+)$/gm,'<div style="font-weight:800;font-size:14px;color:var(--tx);margin:0 0 8px">$1</div>');
+  if(reportEl)reportEl.innerHTML=`<div style="line-height:1.8">${fmt}</div>`;
+  gkCurrentReport=template;
+  if(saveBtn)saveBtn.style.display='block';
 }
 
 let gkCurrentReport='';
@@ -5299,9 +5479,9 @@ function tblClickable(heads, rowsWithHandlers, emptyMsg){
 
 <script>
 if('serviceWorker' in navigator){
-    // Rimuovi service worker vecchi per forzare aggiornamento
+    // Disinstalla TUTTI i service worker per evitare cache persistente
     navigator.serviceWorker.getRegistrations().then(regs=>{
-      regs.forEach(r=>{if(!r.active||!r.active.scriptURL.includes('sw_gk'))r.unregister();});
+      regs.forEach(r=>r.unregister());
     });
   window.addEventListener('load', ()=>{
     navigator.serviceWorker.register('sw.js')
